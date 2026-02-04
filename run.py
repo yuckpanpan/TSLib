@@ -5,7 +5,7 @@ import torch.backends
 from utils.print_args import print_args
 import random
 import numpy as np
-os.environ['CUDA_LAUNCH_BLOCKING'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 if __name__ == '__main__':
     fix_seed = 2021
     random.seed(fix_seed)
@@ -151,26 +151,32 @@ if __name__ == '__main__':
     parser.add_argument('--alpha', type=float, default=0.1, help='KNN for Graph Construction')
     parser.add_argument('--top_p', type=float, default=0.5, help='Dynamic Routing in MoE')
     parser.add_argument('--pos', type=int, choices=[0, 1], default=1, help='Positional Embedding. Set pos to 0 or 1')
-    args = parser.parse_args()
-    # args = parser.parse_args([
-    #     "--task_name", "long_term_forecast",
-    #     "--is_training", "1",
-    #     "--data", "windows_t0",
-    #     "--root_path", "./dataset/",
-    #     "--data_path", "14_14_with_Y_PV.npz",
-    #     "--model", "DLinear",
-    #     "--model_id", "pv_t0_dlinear",
-    #     "--features", "M",
-    #     "--seq_len", "336",
-    #     "--label_len", "0",
-    #     "--pred_len", "337",
-    #     "--enc_in", "100",
-    #     "--dec_in", "100",
-    #     "--c_out", "1",
-    #     "--train_epochs", "3",
-    #     "--batch_size", "16",
-    #     "--num_workers", "2",
-    # ])
+    # args = parser.parse_args()
+
+    args = parser.parse_args([
+        "--task_name", "long_term_forecast",
+        "--is_training", "1",
+        "--data", "windows_t0",
+        "--root_path", "./dataset/",
+        "--data_path", "14_14_with_Y_PV.npz",
+        "--model", "Autoformer",
+        "--model_id", "pv_exog_autoformer_scale",
+        "--features", "MS",
+        "--seq_len", "336",
+        "--label_len", "48",
+        "--pred_len", "24",
+        "--enc_in", "100",
+        "--dec_in", "100",
+        "--c_out", "1",
+        "--d_model", "32",
+        "--n_heads", "4",
+        "--e_layers", "2",
+        "--d_layers", "2",
+        "--d_ff", "256",
+        "--train_epochs", "100",
+        "--batch_size", "512",
+        "--num_workers", "1",
+    ])
 
     if torch.cuda.is_available() and args.use_gpu:
         args.device = torch.device('cuda:{}'.format(args.gpu))

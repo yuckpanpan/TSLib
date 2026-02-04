@@ -1,3 +1,5 @@
 /dataset
 _*
 .history
+checkpoints
+test_results

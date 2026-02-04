@@ -26,15 +26,13 @@ class Dataset_WindowsT0(Dataset):
 
         # ---------- Load Data ----------
         # 兼容处理文件名：支持传 14_14_with_Y_PV 或 14_14_with_Y_PV.npz
-        if data_path.endswith('.npz'):
-            candidates = [os.path.join(root_path, data_path)]
-        else:
-            candidates = [
-                os.path.join(root_path, f'wea_data_{data_path}.npz'),
-                os.path.join(root_path, f'wea_data_{data_path}'),
-                os.path.join(root_path, f'{data_path}.npz'),
-                os.path.join(root_path, data_path),
-            ]
+
+        candidates = [
+            os.path.join(root_path, f'wea_data_{data_path}.npz'),
+            os.path.join(root_path, f'wea_data_{data_path}'),
+            os.path.join(root_path, f'{data_path}.npz'),
+            os.path.join(root_path, data_path),
+        ]
 
         fp = None
         for c in candidates:

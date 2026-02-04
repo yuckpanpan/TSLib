@@ -3,35 +3,13 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
-
+from sklearn.preprocessing import StandardScaler
 from utils.timefeatures import time_features
 
 
 class Dataset_WindowsT0(Dataset):
-    """
-    windows_t0: 你的 npz 是窗口级样本
-      X: [N, L, D]，其中：
-         X[...,0] = timestamp(用于time mark)
-         X[...,1] = timestamp(可忽略)
-         X[...,2:] = exog(未来已知协变量)
-      Y_before / Y_real / Y: [N, L, Dy] 或 [N, L]
-      t0_idx: 所有样本相同的分界点（历史/未来）
-    输出给 TSLib：
-      x      : [seq_len, exog_dim + c_out]   = [exog_hist, y_hist]
-      y      : [label_len+pred_len, exog_dim + c_out] = [exog_seg,  y_seg]
-      x_mark : [seq_len, mark_dim]
-      y_mark : [label_len+pred_len, mark_dim]
-    """
-    def __init__(self, args,
-                 root_path,
-                 data_path,
-                 flag='train',
-                 size=None,
-                 features='M',
-                 target='y',
-                 timeenc=0,
-                 freq='h',
-                 seasonal_patterns=None):
+    def __init__(self, args, root_path, data_path, flag='train', size=None,
+                 features='M', target='y', timeenc=0, freq='h', seasonal_patterns=None):
 
         self.args = args
         self.root_path = root_path
@@ -46,34 +24,55 @@ class Dataset_WindowsT0(Dataset):
             raise ValueError("size must be provided: [seq_len, label_len, pred_len]")
         self.seq_len, self.label_len, self.pred_len = map(int, size)
 
-        # ---------- load npz ----------
-        fp = os.path.join(root_path, f'wea_data_{data_path}')
-        data = np.load(fp, allow_pickle=True)
-
-        X = data['X']  # [N, L, D] dtype may be object because timestamps
-        if hasattr(args, "use_real_y") and args.use_real_y:
-            key = "Y_real" if "Y_real" in data.files else ("Y" if "Y" in data.files else None)
+        # ---------- Load Data ----------
+        # 兼容处理文件名：支持传 14_14_with_Y_PV 或 14_14_with_Y_PV.npz
+        if data_path.endswith('.npz'):
+            candidates = [os.path.join(root_path, data_path)]
         else:
-            key = "Y_before" if "Y_before" in data.files else ("Y" if "Y" in data.files else None)
+            candidates = [
+                os.path.join(root_path, f'wea_data_{data_path}.npz'),
+                os.path.join(root_path, f'wea_data_{data_path}'),
+                os.path.join(root_path, f'{data_path}.npz'),
+                os.path.join(root_path, data_path),
+            ]
 
-        if key is None or key not in data.files:
-            raise KeyError(f"Cannot find Y_before/Y_real/Y in npz. keys={data.files}")
+        fp = None
+        for c in candidates:
+            if os.path.exists(c):
+                fp = c
+                break
+        if fp is None:
+            raise FileNotFoundError(f"Cannot find npz file. Tried: {candidates}")
+
+        data = np.load(fp, allow_pickle=True)
+        X = data['X']  # [N, L, D]
+
+        # ---------- Choose Y key (FIXED) ----------
+        use_real = bool(getattr(args, "use_real_y", False))
+        if use_real and 'Y_real' in data.files:
+            key = 'Y_real'
+        elif 'Y_before' in data.files:
+            key = 'Y_before'
+        elif 'Y' in data.files:
+            key = 'Y'
+        elif 'Y_real' in data.files:
+            # 兜底：只有 Y_real 时就用它
+            key = 'Y_real'
+        else:
+            raise KeyError(f"Cannot find Y in npz. Available keys={data.files}")
         Y = data[key]
 
-        # t0_idx (optional sanity)
-        self.t0_idx = int(data['t0_idx']) if np.ndim(data['t0_idx']) == 0 else int(data['t0_idx'].item())
+        # t0_idx（不一定用，但保留）
+        self.t0_idx = int(data['t0_idx']) if 't0_idx' in data.files else None
 
         N, L, D = X.shape
-        self.N_all = N
-        self.L = L
-        self.D_all = D
+        self.N_all, self.L, self.D_all = N, L, D
 
-        # ---------- split ratios (window-level, ordered to avoid leakage) ----------
+        # ---------- Split Ratios ----------
         train_ratio = float(getattr(args, "train_ratio", 0.7))
         val_ratio = float(getattr(args, "val_ratio", 0.1))
         n_train = int(N * train_ratio)
         n_val = int(N * val_ratio)
-        n_test = N - n_train - n_val
 
         if flag.lower() == "train":
             sl = slice(0, n_train)
@@ -84,56 +83,74 @@ class Dataset_WindowsT0(Dataset):
         else:
             raise ValueError("flag must be train/val/test")
 
-        # ---------- timestamps & exog ----------
-        ts = X[:, :, 0]          # [N, L] timestamp-like
-        X_num = X[:, :, 2:]      # [N, L, D-2] exog only
-        X_num = X_num.astype(np.float32)
+        # ---------- Preprocess X ----------
+        # X[...,0] 是 timestamp 用于 mark
+        ts = X[:, :, 0]
+        # X[...,1] 忽略；X[...,2:] 是未来已知协变量
+        X_num = X[:, :, 2:].astype(np.float32)
         X_num = np.nan_to_num(X_num, nan=0.0, posinf=0.0, neginf=0.0)
 
-        # ---------- Y cleanup ----------
+        # ---------- Preprocess Y ----------
         Y = Y.astype(np.float32)
         Y = np.nan_to_num(Y, nan=0.0, posinf=0.0, neginf=0.0)
         if Y.ndim == 2:
-            Y = Y[..., None]  # [N, L, 1]
+            Y = Y[..., None]
         Dy = Y.shape[2]
 
-        # choose y columns (default: 0)
+        # y_cols
         if hasattr(args, "y_cols") and getattr(args, "y_cols"):
             y_cols = [int(x) for x in str(args.y_cols).split(",") if str(x).strip() != ""]
         else:
             y_cols = [0]
 
+        # bounds check (FIXED)
         for c in y_cols:
             if c < 0 or c >= Dy:
                 raise ValueError(f"y_cols out of range: {y_cols}, Dy={Dy}")
+
         self.y_cols = y_cols
         self.c_out = len(y_cols)
 
-        # ---------- normalize Y using TRAIN only (avoid leakage) ----------
-        y_scale = float(np.nanmax(Y[:n_train, :, :][:, :, self.y_cols]))
-        if (not np.isfinite(y_scale)) or y_scale == 0:
-            y_scale = 1.0
-        self.y_scale = y_scale
+        # ---------- Scaling (TSLib style: fit on TRAIN only) ----------
+        self.scale = bool(getattr(args, "scale", True))
 
-        Y = Y / self.y_scale
+        if self.scale:
+            self.scaler = StandardScaler()
+            self.scaler_x = StandardScaler()
 
-        # dataset interface flags for exp/test
-        self.scale = True
-        self.scaler = None
+            # Fit Y on train only (selected cols)
+            train_y = Y[:n_train, :, :][:, :, self.y_cols].reshape(-1, self.c_out)
+            self.scaler.fit(train_y)
 
-        # ---------- apply split ----------
-        self.X_num = X_num[sl]  # [N', L, exog_dim]
-        self.Y = Y[sl]          # [N', L, Dy] normalized
-        self.ts = ts[sl]        # [N', L]
+            # Transform all Y (selected cols)
+            Y_sel = Y[:, :, self.y_cols].reshape(-1, self.c_out)
+            Y_sel = self.scaler.transform(Y_sel).reshape(N, L, self.c_out).astype(np.float32)
+            Y[:, :, self.y_cols] = Y_sel
 
-        # time feature usage
+            # Fit X on train only (all exog dims)
+            Dx = X_num.shape[2]
+            if Dx > 0:
+                train_x = X_num[:n_train, :, :].reshape(-1, Dx)
+                self.scaler_x.fit(train_x)
+
+                X_flat = X_num.reshape(-1, Dx)
+                X_num = self.scaler_x.transform(X_flat).reshape(N, L, Dx).astype(np.float32)
+        else:
+            self.scaler = None
+            self.scaler_x = None
+
+        # ---------- Apply Split ----------
+        self.X_num = X_num[sl]
+        self.Y = Y[sl]
+        self.ts = ts[sl]
+
         self.use_time_features = (time_features is not None) and (timeenc == 1)
 
-        # enc_in reported for reference (exog_dim)
         self.exog_dim = self.X_num.shape[2]
-        self.enc_in = self.exog_dim  # NOTE: real model enc_in should be exog_dim + c_out (see run args)
+        # x 的实际宽度是 exog_dim + c_out（你 run.py 里 enc_in/dec_in 应该传这个）
+        self.enc_in = self.exog_dim + self.c_out
 
-        # sanity checks
+        # sanity
         if self.seq_len + self.pred_len > self.L:
             raise ValueError(f"seq_len+pred_len must <= L. Got {self.seq_len}+{self.pred_len}>{self.L}")
         if self.label_len > self.seq_len:
@@ -153,24 +170,17 @@ class Dataset_WindowsT0(Dataset):
         return feats.astype(np.float32)
 
     def __getitem__(self, idx):
-        # history exog
-        x_exog = self.X_num[idx, :self.seq_len, :]  # [seq_len, exog_dim]
+        x_exog = self.X_num[idx, :self.seq_len, :]
+        x_y = self.Y[idx, :self.seq_len, :][:, self.y_cols]
+        x = np.concatenate([x_exog, x_y], axis=1)
 
-        # history y (selected cols)
-        x_y = self.Y[idx, :self.seq_len, :][:, self.y_cols]  # [seq_len, c_out]
-
-        # x = [exog, y]
-        x = np.concatenate([x_exog, x_y], axis=1)  # [seq_len, exog_dim + c_out]
-
-        # segment for decoder: label_len + pred_len
         y_begin = self.seq_len - self.label_len
         y_end = self.seq_len + self.pred_len
 
-        y_exog = self.X_num[idx, y_begin:y_end, :]              # [label+pred, exog_dim]
-        y_y = self.Y[idx, y_begin:y_end, :][:, self.y_cols]     # [label+pred, c_out]
-        y = np.concatenate([y_exog, y_y], axis=1)               # [label+pred, exog_dim + c_out]
+        y_exog = self.X_num[idx, y_begin:y_end, :]
+        y_y = self.Y[idx, y_begin:y_end, :][:, self.y_cols]
+        y = np.concatenate([y_exog, y_y], axis=1)
 
-        # marks
         ts_x = self.ts[idx, :self.seq_len]
         ts_y = self.ts[idx, y_begin:y_end]
         x_mark = self._make_mark(ts_x)
@@ -183,6 +193,36 @@ class Dataset_WindowsT0(Dataset):
             torch.from_numpy(y_mark).float(),
         )
 
-    def inverse_transform(self, data):
-        # data can be numpy or torch
-        return data * self.y_scale
+    def inverse_transform(self, data, strict=True):
+        """
+        反标准化：只对 y 通道做 inverse。
+        - strict=True：要求输入最后一维 == c_out，否则报错（推荐，避免悄悄吞错）
+        - strict=False：若最后一维 > c_out，则默认取最后 c_out 列来 inverse（兼容旧逻辑）
+        """
+        if (not self.scale) or (self.scaler is None):
+            return data
+
+        if isinstance(data, torch.Tensor):
+            data_np = data.detach().cpu().numpy()
+            is_tensor = True
+            device = data.device
+            dtype = data.dtype
+        else:
+            data_np = np.asarray(data)
+            is_tensor = False
+            device = None
+            dtype = None
+
+        if data_np.shape[-1] != self.c_out:
+            if strict:
+                raise ValueError(f"inverse_transform expects last dim == c_out({self.c_out}), got {data_np.shape[-1]}")
+            if data_np.shape[-1] < self.c_out:
+                raise ValueError(f"inverse_transform last dim < c_out({self.c_out}), got {data_np.shape[-1]}")
+            data_np = data_np[..., -self.c_out:]
+
+        shp = data_np.shape
+        inv = self.scaler.inverse_transform(data_np.reshape(-1, self.c_out)).reshape(shp)
+
+        if is_tensor:
+            return torch.from_numpy(inv).to(device=device, dtype=dtype)
+        return inv

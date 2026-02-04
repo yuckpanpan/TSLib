@@ -5,7 +5,7 @@ import torch.backends
 from utils.print_args import print_args
 import random
 import numpy as np
-
+os.environ['CUDA_LAUNCH_BLOCKING'] = '2'
 if __name__ == '__main__':
     fix_seed = 2021
     random.seed(fix_seed)

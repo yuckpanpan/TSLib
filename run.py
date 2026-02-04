@@ -168,7 +168,7 @@ if __name__ == '__main__':
         "--enc_in", "100",
         "--dec_in", "100",
         "--c_out", "1",
-        "--d_model", "32",
+        "--d_model", "16",
         "--n_heads", "4",
         "--e_layers", "2",
         "--d_layers", "2",
@@ -176,6 +176,7 @@ if __name__ == '__main__':
         "--train_epochs", "100",
         "--batch_size", "512",
         "--num_workers", "1",
+        "--learning_rate", "0.001",
     ])
 
     if torch.cuda.is_available() and args.use_gpu:

@@ -42,7 +42,7 @@ def metric(pred, true):
 
 
 
-def MAPE(pred, true, eps=1e-3, threshold=None):
+def MAPE(pred, true, eps=0.0, threshold=1.0):
     pred = np.array(pred)
     true = np.array(true)
     if threshold is not None:

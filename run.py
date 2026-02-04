@@ -85,7 +85,7 @@ if __name__ == '__main__':
     parser.add_argument('--itr', type=int, default=1, help='experiments times')
     parser.add_argument('--train_epochs', type=int, default=50, help='train epochs')
     parser.add_argument('--batch_size', type=int, default=512, help='batch size of train input data')
-    parser.add_argument('--patience', type=int, default=3, help='early stopping patience')
+    parser.add_argument('--patience', type=int, default=10, help='early stopping patience')
     parser.add_argument('--learning_rate', type=float, default=0.0001, help='optimizer learning rate')
     parser.add_argument('--des', type=str, default='test', help='exp description')
     parser.add_argument('--loss', type=str, default='MSE', help='loss function')
@@ -151,33 +151,36 @@ if __name__ == '__main__':
     parser.add_argument('--alpha', type=float, default=0.1, help='KNN for Graph Construction')
     parser.add_argument('--top_p', type=float, default=0.5, help='Dynamic Routing in MoE')
     parser.add_argument('--pos', type=int, choices=[0, 1], default=1, help='Positional Embedding. Set pos to 0 or 1')
-    # args = parser.parse_args()
+    args = parser.parse_args()
 
-    args = parser.parse_args([
-        "--task_name", "long_term_forecast",
-        "--is_training", "1",
-        "--data", "windows_t0",
-        "--root_path", "./dataset/",
-        "--data_path", "14_14_with_Y_PV.npz",
-        "--model", "Autoformer",
-        "--model_id", "pv_exog_autoformer_scale",
-        "--features", "MS",
-        "--seq_len", "336",
-        "--label_len", "48",
-        "--pred_len", "24",
-        "--enc_in", "100",
-        "--dec_in", "100",
-        "--c_out", "1",
-        "--d_model", "16",
-        "--n_heads", "4",
-        "--e_layers", "2",
-        "--d_layers", "2",
-        "--d_ff", "256",
-        "--train_epochs", "100",
-        "--batch_size", "512",
-        "--num_workers", "1",
-        "--learning_rate", "0.001",
-    ])
+    # args = parser.parse_args([
+    #     "--task_name", "long_term_forecast",
+    #     "--is_training", "1",
+    #     "--data", "windows_t0",
+    #     "--root_path", "./dataset/",
+    #     "--data_path", "14_14_with_Y_price.npz",
+    #     "--model", "Autoformer",
+    #     "--model_id", "pv_exog_autoformer_py",
+    #     "--features", "MS",
+    #     "--seq_len", "336",
+    #     "--label_len", "96",
+    #     "--pred_len", "24",
+    #     "--enc_in", "100",
+    #     "--dec_in", "100",
+    #     "--c_out", "1",
+    #     "--d_model", "64",
+    #     "--n_heads", "4",
+    #     "--e_layers", "2",
+    #     "--d_layers", "1",
+    #     "--d_ff", "256",
+    #     "--train_epochs", "100",
+    #     "--batch_size", "32",
+    #     "--num_workers", "2",
+    #     "--learning_rate", "0.001",
+    #     "--loss", "MSE",
+    #     "--patience", "10",
+    #     '--inverse'
+    # ])
 
     if torch.cuda.is_available() and args.use_gpu:
         args.device = torch.device('cuda:{}'.format(args.gpu))
@@ -200,7 +203,8 @@ if __name__ == '__main__':
 
 
     if args.task_name == 'long_term_forecast':
-        from exp.exp_long_term_forecasting import Exp_Long_Term_Forecast
+        from exp.exp_long_term_new import Exp_Long_Term_Forecast
+        # from exp.exp_long_term_forecasting import Exp_Long_Term_Forecast
         Exp = Exp_Long_Term_Forecast
     elif args.task_name == 'short_term_forecast':
         from exp.exp_short_term_forecasting import Exp_Short_Term_Forecast
